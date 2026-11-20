@@ -115,6 +115,36 @@ def compare_csv(pair: Pair) -> bytes:
     return render_csv(columns, rows)
 
 
+def provenance_rows(inspection: dict) -> str:
+    join = inspection["state"].get("join")
+    if not join:
+        return ""
+    sources = join.get("sources", [])
+    labels = ["First frame", "Second frame"]
+    pieces = []
+    for index, source in enumerate(sources[:2]):
+        pieces.append(
+            "<dt>" + labels[index] + "</dt><dd>" + escape(source.get("title") or source["capture_id"])
+            + " <code>" + escape(source["capture_id"][:12]) + "</code></dd>"
+        )
+    offset = join.get("offset") or [0, 0]
+    pieces.append("<dt>Second frame offset</dt><dd>" + escape("x " + str(offset[0]) + ", y " + str(offset[1])) + "</dd>")
+    pieces.append("<dt>Alignment basis</dt><dd>" + escape(
+        "Reviewed and confirmed after competing matches" if join.get("ambiguous_at_save")
+        else "Single strong automatic match") + "</dd>")
+    pieces.append("<dt>Seam source</dt><dd>Per-pixel single-frame choice; overlap pixels are not averaged</dd>")
+    fraction = join.get("uncertain_fraction")
+    if fraction is not None:
+        pieces.append("<dt>Unclear seam</dt><dd>" + escape(f"{fraction * 100:.1f}% of the overlap") + "</dd>")
+    return (
+        '<section><h2>Joined capture</h2><dl>' + "".join(pieces) + '</dl>'
+        '<p>The joined working image was formed from two overlapping photographs at one magnification. '
+        'Each overlap pixel comes from exactly one frame, so a sharp vessel edge in one frame is not '
+        'replaced by an averaged ghost. The seam source map in this evidence bundle shows which frame '
+        'supplied each area.</p></section>'
+    )
+
+
 def metadata_rows(inspection: dict) -> str:
     capture = inspection["capture_metadata"]
     details = {
@@ -128,7 +158,8 @@ def metadata_rows(inspection: dict) -> str:
         "Selected region": "Polygon" if inspection["state"]["region"] else "Whole frame",
         "Illumination adjustment": "Applied" if inspection["state"]["lighting"] else "Original",
         "Revision": str(inspection["revision"]),
-        "Capture type": "Synthetic demonstration image" if capture["synthetic"] else "Operator-supplied",
+        "Capture type": "Joined working image" if inspection["state"].get("join")
+        else "Synthetic demonstration image" if capture["synthetic"] else "Operator-supplied",
     }
     return "".join("<dt>" + escape(name) + "</dt><dd>" + escape(value or "—") + "</dd>" for name, value in details.items())
 
@@ -233,6 +264,7 @@ def render_print(report: dict, *, offline: bool = False) -> str:
         '<h1>' + escape(review["title"]) + '</h1>'
         '<p>' + escape(disposition) + ' &nbsp;·&nbsp; ' + escape(review["reviewer"]) + ' &nbsp;·&nbsp; ' + escape(stamp) + '</p>'
         '</header><section><h2>Scope</h2><dl>' + metadata_rows(inspection) + '</dl>' + notices + scope + '</section>'
+        + provenance_rows(inspection)
         + "".join(sections) + marker_section(evidence["markers"])
         + '<footer><p>Original SHA-256 <code>' + escape(inspection["source_digest"]) + '</code></p>'
         + '<p>Manifest SHA-256 <code>' + escape(report["digest"]) + '</code></p></footer></body></html>'

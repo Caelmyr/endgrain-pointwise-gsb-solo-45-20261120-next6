@@ -1,5 +1,6 @@
 import {WorkbenchViewer} from "./viewer.js";
 import {enterLots, enterRecipes, showProbe, wireExtras} from "./extras.js";
+import {enterJoin, wireJoin} from "./join.js";
 import {
   button, createToolInput, displayValue, el, link, metricCards, notices,
   objectTable, plot, shortTime, table,
@@ -169,6 +170,7 @@ function extrasContext() {
 
 function enterPanel() {
   if (!state.current) return;
+  if (state.view === "join") enterJoin(extrasContext()).catch(error => notify(error.message, true));
   if (state.view === "reports") renderReports().catch(error => notify(error.message, true));
   if (state.view === "recipes") enterRecipes(extrasContext()).catch(error => notify(error.message, true));
   if (state.view === "lots") enterLots(extrasContext()).catch(error => notify(error.message, true));
@@ -179,10 +181,10 @@ function renderAll() {
   const active = ready ? state.view : "inspect";
   $$(".main-nav [data-view]").forEach(item => {
     item.classList.toggle("active", item.dataset.view === active);
-    item.disabled = !ready && item.dataset.view !== "inspect";
+    item.disabled = !ready;
   });
   $("#empty").hidden = ready;
-  ["inspect", "compare", "reports", "recipes", "lots"].forEach(key => { $("#" + key + "-view").hidden = !ready || active !== key; });
+  ["inspect", "join", "compare", "reports", "recipes", "lots"].forEach(key => { $("#" + key + "-view").hidden = !ready || active !== key; });
   $("#controls").hidden = !ready || active !== "inspect";
   renderLibrary();
   if (!ready) return;
@@ -211,6 +213,43 @@ function renderHeader() {
     meta.format + " " + meta.width + " × " + meta.height,
   ];
   $("#face-description").textContent = labels.join("  /  ");
+  renderProvenance();
+}
+
+function renderProvenance() {
+  const panel = $("#join-provenance");
+  const join = state.current.join;
+  const body = $("#provenance-body");
+  const links = state.current.links;
+  if (!join) {
+    panel.hidden = true;
+    body.replaceChildren();
+    return;
+  }
+  panel.hidden = false;
+  $("#provenance-download").href = links.download;
+  const frames = join.sources.map((source, index) => el("div", {className: "provenance-frame"},
+    el("img", {src: links["source_" + (index + 1) + "_thumb"], alt: "Original capture of " + source.title}),
+    el("div", {},
+      el("strong", {text: (index === 0 ? "First frame · " : "Second frame · ") + source.title}),
+      link("Original file ↓", links["source_" + (index + 1) + "_original"], "text-link"),
+    ),
+  ));
+  const seam = el("div", {className: "provenance-seam"},
+    el("img", {src: join.stitch ? links.seam : "", alt: "Seam source map with review areas"}),
+    el("div", {text: "Blue is the first frame, amber the second, pink where the sharper frame was unclear. "
+      + "The two originals stay available here."}),
+  );
+  const stats = [
+    ["Second frame at", "x " + join.offset[0] + " · y " + join.offset[1]],
+    ["Alignment", join.ambiguous_at_save ? "Confirmed after review" : "Automatic, single strong match"],
+    ["Unclear seam", (join.uncertain_fraction * 100).toFixed(1) + "% of overlap"],
+  ];
+  body.replaceChildren(
+    el("div", {className: "provenance-grid"}, ...frames, seam),
+    el("div", {className: "provenance-meta"},
+      ...stats.map(([label, value]) => el("div", {}, el("span", {text: label}), el("strong", {text: value})))),
+  );
 }
 
 function renderSetup() {
@@ -795,6 +834,7 @@ function wire() {
 async function boot() {
   wire();
   wireExtras(extrasContext());
+  wireJoin(extrasContext());
   const catalogue = await api("/api/tools");
   state.tools = new Map(catalogue.tools.map(tool => [tool.id, tool]));
   await reloadLibrary();

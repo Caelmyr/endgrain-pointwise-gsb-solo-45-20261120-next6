@@ -7,13 +7,16 @@ from typing import Any
 from flask import Flask, Response, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
 
-from . import calibration_preview, comparison, exchange, lots, measurements, plates, probe, recipes, reports, workspaces
+from . import (
+    calibration_preview, comparison, exchange, lots, measurements, plates, probe, recipes,
+    reports, stitch, workspaces,
+)
 from .captures import (
     SURFACES, image_etag, ingest_inspection, ingest_reference, select_references,
 )
 from .database import Database
 from .demo import demo_payloads
-from .errors import Limits, WorkbenchError
+from .errors import Conflict, Limits, WorkbenchError
 from .imaging import MAX_UPLOAD_BYTES, encode_png
 from .quality import prepare_download_image
 from .validation import choice, document, expect_revision, fields, integer, string
@@ -104,7 +107,122 @@ def create_app(data_folder: str | None = None) -> Flask:
 
     @app.get("/api/tools")
     def tools():
-        return jsonify({"tools": measurements.catalog(), "surfaces": SURFACES, "dispositions": reports.DISPOSITIONS})
+        return jsonify({
+            "tools": measurements.catalog(), "surfaces": SURFACES,
+            "dispositions": reports.DISPOSITIONS, "join_sides": stitch.SIDES,
+        })
+
+    @app.get("/api/captures")
+    def capture_library():
+        records = db.captures()
+        items = []
+        for record in records:
+            if record["metadata"]["source_type"] != "sample":
+                continue
+            items.append({
+                "id": record["id"],
+                "title": record["title"],
+                "width": record["metadata"]["width"],
+                "height": record["metadata"]["height"],
+                "joined": "joined" in record["metadata"],
+                "thumbnail": "/api/captures/" + record["id"] + "/thumb.png",
+                "original": "/api/captures/" + record["id"] + "/original",
+            })
+        return jsonify({"items": items})
+
+    @app.post("/api/stitches/preview")
+    def stitch_preview():
+        body = read_document()
+        placement = stitch.analyze(db, body)
+        payload = placement.payload()
+        payload["chosen"] = None
+        payload["links"] = {"create": "/api/stitches"}
+        if placement.candidates:
+            payload["candidate_links"] = [
+                {
+                    **item.json(),
+                    "image": stitch.preview_query(placement, item, body.get("seam")),
+                    "seam": stitch.preview_query(placement, item, body.get("seam"), view="seam"),
+                }
+                for item in placement.candidates
+            ]
+            try:
+                chosen = stitch.resolve(placement, body.get("alignment"))
+            except Conflict:
+                chosen = None
+            if chosen is not None:
+                payload["chosen"] = chosen.json()
+                base = stitch.preview_query(placement, chosen, body.get("seam"))
+                payload["links"].update({"image": base, "seam": base + "&view=seam"})
+        return jsonify(payload)
+
+    @app.get("/api/stitches/preview.json")
+    def stitch_preview_detail():
+        body = stitch.preview_request(request.args)
+        placement, chosen, composite = stitch.preview(db, body)
+        seam = composite.seam
+        return jsonify({
+            "first": placement.first.capture_id,
+            "second": placement.second.capture_id,
+            "side": placement.side,
+            "chosen": chosen.json(),
+            "seam": seam,
+            "uncertain_percent": round(seam["uncertain_fraction"] * 100, 1),
+            "compared": round((1 - seam["tie_rows_fraction"]) * 100, 1),
+            "preview": True,
+            "notices": [
+                "This is a reduced preview. Saving recomputes the seam at full resolution.",
+            ],
+        })
+
+    @app.get("/api/stitches/preview.png")
+    def stitch_preview_image():
+        body = stitch.preview_request(request.args)
+        view = choice(request.args.get("view", "image"), "join preview view", ("image", "seam"))
+        _, _, composite = stitch.preview(db, body)
+        image = stitch.seam_visual(composite) if view == "seam" else stitch.preview_image(composite)
+        return binary(encode_png(image), "image/png")
+
+    @app.post("/api/stitches")
+    def create_stitch():
+        return jsonify(stitch.create(db, read_document())), 201
+
+    @app.get("/api/stitches/<stitch_id>")
+    def one_stitch(stitch_id):
+        return jsonify(stitch.describe_stitch(db.stitch(stitch_id)))
+
+    @app.get("/api/stitches/<stitch_id>/seam.json")
+    def stitch_seam(stitch_id):
+        record = db.stitch(stitch_id)
+        return jsonify({**record["seam"], "resolution": record["resolution"],
+                        "alignment": record["alignment"]})
+
+    @app.get("/api/stitches/<stitch_id>/seam.png")
+    def stitch_seam_image(stitch_id):
+        return binary(db.stitch_attachment(stitch_id, "preview"), "image/png", etag=stitch_id, immutable=True)
+
+    @app.get("/api/stitches/<stitch_id>/mask.png")
+    def stitch_mask(stitch_id):
+        return binary(db.stitch_attachment(stitch_id, "mask"), "image/png", etag=stitch_id, immutable=True)
+
+    @app.get("/api/stitches/<stitch_id>/working.png")
+    def stitch_working(stitch_id):
+        name, payload = stitch.working_image(db, stitch_id, view=choice(
+            request.args.get("view", "clean"), "view", ("display", "clean", "region"),
+        ))
+        return binary(payload, "image/png", name=name if request.args.get("download") == "1" else None)
+
+    @app.get("/api/inspections/<inspection_id>/seam.json")
+    def inspection_seam(inspection_id):
+        record = db.stitch_for_inspection(inspection_id)
+        return jsonify({**record["seam"], "resolution": record["resolution"],
+                        "alignment": record["alignment"]})
+
+    @app.get("/api/inspections/<inspection_id>/seam.png")
+    def inspection_seam_image(inspection_id):
+        record = db.stitch_for_inspection(inspection_id)
+        return binary(db.stitch_attachment(record["id"], "preview"), "image/png",
+                      etag=record["id"], immutable=True)
 
     @app.get("/api/inspections")
     def inspections():

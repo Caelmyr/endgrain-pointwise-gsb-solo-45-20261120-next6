@@ -20,6 +20,7 @@
       <span>Endgrain <i>Lab</i></span>
     </a>
     <nav class="main-nav" aria-label="Workbench views">
+      <button type="button" data-view="join">Join</button>
       <button type="button" data-view="inspect" class="active">Inspect</button>
       <button type="button" data-view="compare">Compare</button>
       <button type="button" data-view="reports">Reports</button>
@@ -74,6 +75,17 @@
           </div>
           <button class="button outline" id="details-open" type="button">Edit details</button>
         </header>
+
+        <section id="join-provenance" class="panel provenance-panel" hidden>
+          <div class="section-head">
+            <div>
+              <div class="small-label">JOINED CAPTURE</div>
+              <h3>Seam and source frames</h3>
+            </div>
+            <a class="button outline" id="provenance-download">Download joined working image ↓</a>
+          </div>
+          <div id="provenance-body"></div>
+        </section>
 
         <div class="stage-card">
           <div class="stage-bar">
@@ -130,6 +142,68 @@
             <div id="notes-list" class="notes-list"></div>
           </section>
         </div>
+      </section>
+
+      <section id="join-view" class="tab-view" hidden>
+        <header class="work-head">
+          <div>
+            <div class="small-label">CAPTURE PAIR</div>
+            <h2>Join two overlapping frames</h2>
+            <p id="join-subtitle" class="subtle">Two photographs of one face, same magnification, camera moved sideways.</p>
+          </div>
+        </header>
+        <section class="panel join-panel">
+          <form id="join-form" class="stack-form">
+            <div class="form-grid join-inputs">
+              <label>First frame<select name="first" id="join-first" required></select></label>
+              <label>Second frame<select name="second" id="join-second" required></select></label>
+              <label>Second frame sits
+                <select name="side" id="join-side">
+                  <option value="right">To the right</option>
+                  <option value="left">To the left</option>
+                  <option value="below">Below</option>
+                  <option value="above">Above</option>
+                </select>
+              </label>
+              <label>Joined working name<input name="title" maxlength="90" placeholder="From both frame names"></label>
+              <label>Material<input name="material" maxlength="80"></label>
+              <label>Lot<input name="lot" maxlength="72"></label>
+              <label>Surface
+                <select name="surface">
+                  <option value="unknown">Unknown</option>
+                  <option value="sanded">Sanded</option>
+                  <option value="sawn">Sawn</option>
+                  <option value="polished">Polished</option>
+                </select>
+              </label>
+              <label>Sharpness margin<input name="focus_margin" type="number" min="0" max="2" step="0.02" value="0.12"></label>
+            </div>
+            <label class="checkbox"><input name="match_brightness" type="checkbox" checked>Match overall brightness between frames</label>
+            <div class="panel-actions">
+              <button class="button strong" type="submit">Find the overlap</button>
+            </div>
+          </form>
+          <div id="join-status" class="join-status" hidden></div>
+          <div id="join-review" hidden>
+            <div class="join-review-head">
+              <h3>Alignment to confirm</h3>
+              <p id="join-notice" class="subtle"></p>
+            </div>
+            <div id="join-candidates" class="join-candidates"></div>
+            <div class="join-preview">
+              <div class="segmented join-view-toggle" role="group" aria-label="Join preview view">
+                <button type="button" data-join-view="image" class="active">Joined preview</button>
+                <button type="button" data-join-view="seam">Seam source</button>
+              </div>
+              <img id="join-image" alt="Preview of the joined frames">
+            </div>
+            <div id="join-seam-notes" class="join-seam-notes"></div>
+            <div class="panel-actions">
+              <button id="join-save" type="button" class="button strong">Save joined working image</button>
+              <button id="join-clear" type="button" class="button ghost">Clear</button>
+            </div>
+          </div>
+        </section>
       </section>
 
       <section id="compare-view" class="tab-view" hidden>

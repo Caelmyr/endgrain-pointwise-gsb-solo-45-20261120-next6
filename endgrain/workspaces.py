@@ -33,6 +33,8 @@ def describe_plane(inspection: dict) -> Plane:
 def project_metadata(inspection: dict) -> dict:
     result = inspection.copy()
     result["plane"] = describe_plane(inspection).json()
+    join = inspection["state"].get("join")
+    result["join"] = join
     root = "/api/inspections/" + inspection["id"]
     captures = "/api/captures/" + inspection["capture_id"]
     result["links"] = {
@@ -46,12 +48,23 @@ def project_metadata(inspection: dict) -> dict:
         "notes": root + "/notes",
         "reports": root + "/reports",
     }
+    if join and join.get("stitch"):
+        stitch = "/api/stitches/" + join["stitch"]
+        result["links"].update({
+            "seam": stitch + "/seam.png",
+            "seam_json": stitch + "/seam.json",
+            "download": stitch + "/working.png?download=1",
+        })
+        for index, source in enumerate(join.get("sources", []), 1):
+            capture = "/api/captures/" + source["capture_id"]
+            result["links"]["source_" + str(index) + "_original"] = capture + "/original"
+            result["links"]["source_" + str(index) + "_thumb"] = capture + "/thumb.png"
     return result
 
 
 def normalized_state(db: Database, state: Any, width: int, height: int) -> dict:
     body = document(state, "measuring state")
-    fields(body, {"calibration", "region", "lighting"}, "measuring state")
+    fields(body, {"calibration", "region", "lighting", "join"}, "measuring state")
     calibration = normalize_calibration(body.get("calibration"), width, height)
     plane = plane_for(width, height, calibration)
     region = normalize_region(body.get("region"), plane)

@@ -6,15 +6,16 @@ from zipfile import BadZipFile, ZIP_DEFLATED, ZipFile, ZipInfo
 import json
 
 from .captures import capture_payload, observation_fields
-from .database import Database, encode
+from .database import Database, encode, timestamp
 from .errors import Limits, WorkbenchError
 from .geometry import normalize_calibration, normalize_region, pixel_point, plane_for
 from .imaging import MAX_UPLOAD_BYTES, read_image
 from .lighting import apply_flat_field
 from .reports import export_run_csv, render_print
+from .stitch import SIDES
 from .measurements import TOOLS
 from .plates import report_plate
-from .validation import document, fields, flag, list_of, number, string
+from .validation import choice, document, fields, flag, list_of, number, string
 
 ARCHIVE_MAX = 76 * 1024 * 1024
 MAX_JSON = 800 * 1024
@@ -60,6 +61,30 @@ def prepare(db: Database, inspection_id: str) -> Bundle:
             "entry": capture_entry(ref, "reference"),
             "adjustment": {key: val for key, val in lighting.items() if key != "reference_id"},
         }
+    join = None
+    join_files = []
+    if inspection["state"].get("join"):
+        joined = db.stitch_for_inspection(inspection_id)
+        frame_one, one = db.capture_blob(joined["first_capture_id"], "original")
+        frame_two, two = db.capture_blob(joined["second_capture_id"], "original")
+        mask = db.stitch_attachment(joined["id"], "mask")
+        preview = db.stitch_attachment(joined["id"], "preview")
+        join = {
+            "first": capture_entry(one, "frame-one"),
+            "second": capture_entry(two, "frame-two"),
+            "side": joined["side"],
+            "resolution": joined["resolution"],
+            "alignment": joined["alignment"],
+            "seam": joined["seam"],
+            "mask": {"file": "seam-mask.png", "digest": sha256(mask).hexdigest()},
+            "preview": {"file": "seam-map.png", "digest": sha256(preview).hexdigest()},
+        }
+        join_files = [
+            (join["first"]["file"], frame_one),
+            (join["second"]["file"], frame_two),
+            ("seam-mask.png", mask),
+            ("seam-map.png", preview),
+        ]
     frame = {
         "format": INSPECTION_VERSION,
         "metadata": {key: inspection[key] for key in ("title", "material", "lot", "surface")},
@@ -67,6 +92,7 @@ def prepare(db: Database, inspection_id: str) -> Bundle:
         "calibration": inspection["state"]["calibration"],
         "region": inspection["state"]["region"],
         "reference": recall,
+        "join": join,
         "markers": [{key: marker[key] for key in ("point", "label", "comment")} for marker in marker_list],
     }
     output = BytesIO()
@@ -75,6 +101,8 @@ def prepare(db: Database, inspection_id: str) -> Bundle:
         zput(zipped, source_entry["file"], photo)
         if recall:
             zput(zipped, recall["entry"]["file"], ref_image)
+        for name, payload in join_files:
+            zput(zipped, name, payload)
     return Bundle(f"endgrain-inspection-{inspection['id'][:10]}.zip", output.getvalue())
 
 
@@ -116,7 +144,7 @@ def decode_archive(open_zip: ZipFile, members: dict[str, ZipInfo]) -> dict:
         data = document(json.loads(payload.decode("utf-8")), "inspection archive")
     except (ValueError, UnicodeError, RecursionError):
         raise WorkbenchError("The inspection manifest is unreadable.", "file") from None
-    fields(data, {"format", "metadata", "capture", "calibration", "region", "reference", "markers"})
+    fields(data, {"format", "metadata", "capture", "calibration", "region", "reference", "join", "markers"})
     if data.get("format") != INSPECTION_VERSION:
         raise WorkbenchError("Use an Endgrain Lab inspection exchange archive.", "file")
     return data
@@ -182,14 +210,58 @@ def _restore_from_zip(db: Database, zipped: ZipFile) -> dict:
         if ref_name == name:
             raise WorkbenchError("The source and reference must have separate entries.", "file")
         files.add(ref_name)
+    join_fields = manifest.get("join")
+    restored_join = None
+    if join_fields is not None:
+        restored_join = _read_join(join_fields, zipped, members, source)
+        for entry_name in restored_join["names"]:
+            if entry_name in files:
+                raise WorkbenchError("The joined frames must have separate archive entries.", "file")
+            files.add(entry_name)
     if files != set(members):
         raise WorkbenchError("The archive contains an entry which the manifest does not describe.", "file")
     with db.transaction() as conn:
         source_id = db.put_capture(conn, capture)
         if reference:
             controls["reference_id"] = db.put_capture(conn, reference)
-        values["state"] = {"calibration": calibration, "region": region, "lighting": controls}
+        state = {"calibration": calibration, "region": region, "lighting": controls}
+        if restored_join:
+            first_id = db.put_capture(conn, restored_join["first"]["capture"])
+            second_id = db.put_capture(conn, restored_join["second"]["capture"])
+            state["join"] = {
+                "stitch": None,
+                "side": restored_join["side"],
+                "offset": restored_join["seam"].get("placement", {}).get("second", [0, 0]),
+                "ambiguous_at_save": restored_join["resolution"] == "confirmed",
+                "sources": [
+                    {"capture_id": first_id, "title": restored_join["first"]["capture"]["title"]},
+                    {"capture_id": second_id, "title": restored_join["second"]["capture"]["title"]},
+                ],
+                "uncertain_fraction": restored_join["seam"].get("uncertain_fraction", 0.0),
+                "uncertain_regions": len(restored_join["seam"].get("uncertain_regions", [])),
+            }
+        values["state"] = state
         created = db.create_inspection(conn, source_id, values)
+        if restored_join:
+            stitch_id = db.add_stitch(conn, {
+                "first_capture_id": state["join"]["sources"][0]["capture_id"],
+                "second_capture_id": state["join"]["sources"][1]["capture_id"],
+                "capture_id": source_id,
+                "inspection_id": created["id"],
+                "side": restored_join["side"],
+                "resolution": restored_join["resolution"],
+                "alignment": restored_join["alignment"],
+                "seam": restored_join["seam"],
+                "seam_mask": restored_join["mask"],
+                "seam_preview": restored_join["preview"],
+            })
+            state = dict(created["state"])
+            state["join"] = {**state["join"], "stitch": stitch_id}
+            conn.execute(
+                "UPDATE inspections SET state = ?, revision = 2, updated_at = ? WHERE id = ?",
+                (encode(state), timestamp(), created["id"]),
+            )
+            created = db.inspection_on(conn, created["id"])
         _restore_notes_on(db, conn, created["id"], notes)
         db.event(conn, created["id"], created["revision"], "archive_restored", {"source_digest": capture["digest"]})
     return created
@@ -212,8 +284,45 @@ def _read_reference(raw, source, zipped: ZipFile, members: dict):
     return reference, controls, name
 
 
+def _read_join(raw, zipped: ZipFile, members: dict, source) -> dict:
+    described = document(raw, "joined capture")
+    fields(described, {"first", "second", "side", "resolution", "alignment", "seam",
+                       "mask", "preview"}, "joined capture")
+    first, first_photo, first_name = read_capture(described.get("first"), zipped, members, "sample")
+    second, second_photo, second_name = read_capture(described.get("second"), zipped, members, "sample")
+    side = choice(described.get("side"), "second frame side", tuple(SIDES))
+    resolution = choice(described.get("resolution"), "join resolution", ("automatic", "confirmed"))
+    if first_photo.dimensions == source.dimensions:
+        raise WorkbenchError("The joined capture must be a separate entry from its frames.", "file")
+    seam = document(described.get("seam"), "seam record")
+    mask_name, mask = _read_seam_image(described.get("mask"), zipped, members, "seam mask")
+    preview_name, preview = _read_seam_image(described.get("preview"), zipped, members, "seam map")
+    return {
+        "first": {"capture": first, "name": first_name},
+        "second": {"capture": second, "name": second_name},
+        "side": side,
+        "resolution": resolution,
+        "alignment": document(described.get("alignment"), "join alignment"),
+        "seam": seam,
+        "mask": mask,
+        "preview": preview,
+        "names": [first_name, second_name, mask_name, preview_name],
+    }
+
+
+def _read_seam_image(raw, zipped: ZipFile, members: dict, label: str) -> tuple[str, bytes]:
+    values = document(raw, "seam image entry")
+    fields(values, {"file", "digest"}, "seam image entry")
+    name = string(values.get("file"), label + " entry", 45, required=True)
+    digest = string(values.get("digest"), label + " SHA-256", 64, required=True)
+    payload = read_member(zipped, members, name, MAX_UPLOAD_BYTES)
+    if sha256(payload).hexdigest() != digest:
+        raise WorkbenchError("A stored seam image does not match its checksum.", "file")
+    return name, payload
+
+
 def _restore_notes_on(db: Database, conn, inspection_id: str, notes: list[dict]) -> None:
-    from .database import identifier, timestamp
+    from .database import identifier
     for note in notes:
         conn.execute(
             """INSERT INTO notes (id,inspection_id,revision,point,label,comment,created_at)
@@ -273,6 +382,10 @@ def _bundle_files(
     original, capture = db.capture_blob(inspected["capture_id"], "original")
     add("original." + capture["metadata"]["extension"], original)
     add("scope.png", report_plate(db, report))
+    if inspected["state"].get("join"):
+        joined = db.stitch_for_inspection(inspection_id)
+        add("seam.png", db.stitch_attachment(joined["id"], "preview"))
+        add("join.json", encode(joined["seam"]).encode("utf-8"))
     if inspected["state"]["lighting"]:
         ref, metadata = db.capture_blob(inspected["state"]["lighting"]["reference_id"], "original")
         add("reference." + metadata["metadata"]["extension"], ref)
@@ -331,6 +444,8 @@ def standard_report_entries(inspection: dict, runs: list) -> set[str]:
     if ext not in {"png", "jpg", "tiff", "webp"}:
         raise WorkbenchError("The manifest identifies an unsupported source format.", "file")
     body = {"report.html", "scope.png", "manifest.json", "manifest.sha256", "original." + ext}
+    if document(inspection.get("state"), "measuring state").get("join"):
+        body.update({"seam.png", "join.json"})
     references = set()
     seen_ids = set()
     for count, item in enumerate(runs, 1):

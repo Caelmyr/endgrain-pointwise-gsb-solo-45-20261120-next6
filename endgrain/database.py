@@ -83,6 +83,20 @@ CREATE TABLE IF NOT EXISTS recipes (
     recipe TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS stitches (
+    id TEXT PRIMARY KEY,
+    first_capture_id TEXT NOT NULL REFERENCES captures(id),
+    second_capture_id TEXT NOT NULL REFERENCES captures(id),
+    capture_id TEXT NOT NULL REFERENCES captures(id),
+    inspection_id TEXT NOT NULL REFERENCES inspections(id) ON DELETE CASCADE,
+    side TEXT NOT NULL,
+    resolution TEXT NOT NULL,
+    alignment TEXT NOT NULL,
+    seam TEXT NOT NULL,
+    seam_mask BLOB NOT NULL,
+    seam_preview BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS inspection_order ON inspections(updated_at DESC, id);
 CREATE INDEX IF NOT EXISTS run_order ON runs(inspection_id, revision DESC, created_at DESC, id);
 CREATE INDEX IF NOT EXISTS note_order ON notes(inspection_id, revision, created_at DESC);
@@ -235,6 +249,63 @@ class Database:
         )
         self.event(conn, new_id, 1, "inspection_created", {"title": values["title"]})
         return self.inspection_on(conn, new_id)
+
+    def add_stitch(self, conn: sqlite3.Connection, values: dict) -> str:
+        stitch_id = identifier()
+        conn.execute(
+            """INSERT INTO stitches
+               (id,first_capture_id,second_capture_id,capture_id,inspection_id,side,resolution,
+                alignment,seam,seam_mask,seam_preview,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                stitch_id,
+                values["first_capture_id"],
+                values["second_capture_id"],
+                values["capture_id"],
+                values["inspection_id"],
+                values["side"],
+                values["resolution"],
+                encode(values["alignment"]),
+                encode(values["seam"]),
+                values["seam_mask"],
+                values["seam_preview"],
+                timestamp(),
+            ),
+        )
+        return stitch_id
+
+    def stitch_on(self, conn: sqlite3.Connection, stitch_id: str) -> dict:
+        row = conn.execute("SELECT * FROM stitches WHERE id = ?", (stitch_id,)).fetchone()
+        if row is None:
+            raise Missing("Joined image")
+        result = dict(row)
+        del result["seam_mask"], result["seam_preview"]
+        for name in ("alignment", "seam"):
+            result[name] = json.loads(result[name])
+        return result
+
+    def stitch(self, stitch_id: str) -> dict:
+        with self.connection() as conn:
+            return self.stitch_on(conn, stitch_id)
+
+    def stitch_for_inspection(self, inspection_id: str) -> dict:
+        with self.connection() as conn:
+            self.inspection_on(conn, inspection_id)
+            row = conn.execute(
+                "SELECT id FROM stitches WHERE inspection_id = ? ORDER BY created_at DESC, id LIMIT 1",
+                (inspection_id,),
+            ).fetchone()
+            if row is None:
+                raise Missing("Joined image")
+            return self.stitch_on(conn, row["id"])
+
+    def stitch_attachment(self, stitch_id: str, category: str) -> bytes:
+        column = {"mask": "seam_mask", "preview": "seam_preview"}[category]
+        with self.connection() as conn:
+            row = conn.execute(f"SELECT {column} FROM stitches WHERE id = ?", (stitch_id,)).fetchone()
+        if row is None:
+            raise Missing("Joined image")
+        return row[0]
 
     def import_inspection(self, capture: dict, values: dict) -> dict:
         with self.transaction() as conn:
