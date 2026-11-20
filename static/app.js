@@ -584,10 +584,12 @@ async function renderReports() {
     const printable = link("Print view", report.links.html);
     printable.target = "_blank";
     printable.rel = "noopener";
+    const external = link("External review ZIP ↓", report.links.review);
+    external.title = "Region-only copy for a commissioning party: no source capture, no illumination reference";
     return el("div", {className: "issued-row"},
       el("div", {}, el("strong", {text: report.title}),
         el("small", {text: "Revision " + report.revision + " · " + report.reviewer + " · " + shortTime(report.created_at)})),
-      printable, link("Evidence ZIP ↓", report.links.zip),
+      printable, link("Evidence ZIP ↓", report.links.zip), external,
     );
   });
   $("#issued-reports").replaceChildren(...(values.length ? values : [el("p", {className: "notes-empty", text: "No reports have been issued."})]));

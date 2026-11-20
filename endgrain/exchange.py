@@ -319,6 +319,7 @@ def verified_manifest(raw: bytes, index: dict) -> dict:
         "report_id": report_id,
         "report_title": string(review.get("title"), "report title", 120, required=True),
         "source_sha256": string(inspect.get("source_digest"), "source checksum", 64, required=True),
+        "manifest_sha256": index.get("manifest_sha256"),
         "measurement_count": len(ledger),
         "entries": entries,
         "has_reference": bool(document(inspect.get("state"), "measuring state").get("lighting")),

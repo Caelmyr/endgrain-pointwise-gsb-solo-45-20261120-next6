@@ -144,6 +144,21 @@ export async function showProbe(app, position) {
   app.showDialog("#probe-dialog");
 }
 
+function renderReviewCheck(checked) {
+  const summary = checked.verified ? "Review package checks passed." : "This package needs attention.";
+  const scope = [];
+  if (checked.remeasurable?.length) scope.push("Re-measurable: " + checked.remeasurable.join(", "));
+  if (checked.compare_only?.length) scope.push("Compare-only: " + checked.compare_only.join(", "));
+  pick("#evidence-output").replaceChildren(
+    el("strong", {text: summary + " " + checked.report_title}),
+    el("p", {text: "Revision " + checked.revision + " · issued manifest " + checked.manifest_sha256.slice(0, 16) + "…"}),
+    ...(scope.length ? [el("p", {className: "subtle", text: scope.join(" · ")})] : []),
+    el("p", {className: "subtle", text: checked.notice}),
+    ...(checked.warnings?.length ? [notices(checked.warnings)] : []),
+    table(["Review file", "Bytes", "Checksum"], checked.files.map(item => [item.name, item.size, item.verified ? "Matched" : "Mismatch"])),
+  );
+}
+
 export function wireExtras(app) {
   const {api, bindForm, json, notify, showDialog, state} = app;
   const lotForm = pick("#lots-form");
@@ -156,6 +171,10 @@ export function wireExtras(app) {
   });
   bindForm("#evidence-form", async form => {
     const checked = await api("/api/evidence/check", {method: "POST", body: new FormData(form)});
+    if (checked.package_kind === "external-review") {
+      renderReviewCheck(checked);
+      return;
+    }
     const summary = checked.verified ? "Bundle checks passed." : "At least one file failed its checksum.";
     pick("#evidence-output").replaceChildren(
       el("strong", {text: summary + " " + checked.report_title}),

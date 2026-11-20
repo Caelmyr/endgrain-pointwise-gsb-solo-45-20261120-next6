@@ -20,6 +20,19 @@ For a Python 3.11 environment, install `requirements.txt` and run `./start.sh`. 
 4. Run a measurement. Results include an overlay, summary, and a downloadable CSV. Use the Pixel probe on the working image for a magnified patch, source mapping and luminance profiles. Add review markers by clicking locations in the selected measuring region.
 5. Compare two saved measurements of the same kind. A color difference overlay is available when they share a source, plane, region and lighting settings. The Recipes tab can replay selected tool settings on a second inspection. The Lots tab screens saved readings and exports a slide of face overlays and a CSV.
 6. Include current measurements in a report and download its evidence ZIP. It contains source material, the measuring setup illustration, overlays, tables, the manifest and checksums. The separate inspection exchange ZIP carries the original capture, settings, attached lighting reference and current markers into a separate record on restore.
+7. For a commissioning party, download the external review ZIP on the same issued report. It carries a region-only copy of the pictures, the offline report and reading tables. The source capture outside the selected region and the illumination reference stay in the internal evidence ZIP.
+
+## External review package
+
+The review ZIP is built from the issued report's stored revision, so re-drawing the region or attaching a new reference later does not change a package already sent out. It contains:
+
+- `report.html` – the same report, readable offline, with per-measurement allowance labels
+- `scope.png` – region-only source cutout beside the measuring support with calibration, region outline, scale and markers
+- `measuring-plane.png` – the region cutout as premultiplied RGBA; transparent pixels carry `0, 0, 0` and no original colour
+- `measurements/NN-<tool>.png` / `.csv` – overlays masked the same way, plus the full reading table
+- `review.json` / `review.sha256` – the review record naming the issued manifest and source SHA-256 values, with a checksum per file
+
+Each measurement is labelled **re-measurable from this package** when its reference positions and reading rows all fall inside the delivered region and its saved plane and state match the report. Otherwise it is **compare against issued evidence only** and the record lists the withholding reason (for example a transect endpoint or swatch outside the region, or illumination correction that cannot be replayed). Markers outside the region stay in the record with coordinates but are not pictured. The internal evidence ZIP is unchanged and remains the complete record.
 
 ## Image measurements
 
@@ -43,4 +56,4 @@ A change to measuring setup starts a new revision. Older results stay in measure
 
 ## Source layout
 
-`endgrain/` contains image ingest, geometry, measurement, SQLite, and report logic. `static/` contains the browser workbench. `app.py` runs the Waitress server. `scripts/count_backend.py` can count Python backend source.
+`endgrain/` contains image ingest, geometry, measurement, SQLite, report and external-review logic (`review.py`), `static/` contains the browser workbench. `app.py` runs the Waitress server. `scripts/count_backend.py` can count Python backend source.

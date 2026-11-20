@@ -7,7 +7,7 @@ from typing import Any
 from flask import Flask, Response, jsonify, request, send_file
 from werkzeug.exceptions import BadRequest, RequestEntityTooLarge, UnsupportedMediaType
 
-from . import calibration_preview, comparison, exchange, lots, measurements, plates, probe, recipes, reports, workspaces
+from . import calibration_preview, comparison, exchange, lots, measurements, plates, probe, recipes, reports, review, workspaces
 from .captures import (
     SURFACES, image_etag, ingest_inspection, ingest_reference, select_references,
 )
@@ -288,6 +288,11 @@ def create_app(data_folder: str | None = None) -> Flask:
         archive = exchange.report_bundle(db, inspection_id, report_id)
         return binary(archive.bytes, "application/zip", name=archive.name)
 
+    @app.get("/api/inspections/<inspection_id>/reports/<report_id>/review.zip")
+    def review_package(inspection_id, report_id):
+        archive = review.package(db, inspection_id, report_id)
+        return binary(archive["bytes"], "application/zip", name=archive["name"])
+
     @app.get("/api/inspections/<inspection_id>/archive.zip")
     def export_archive(inspection_id):
         bundle = exchange.prepare(db, inspection_id)
@@ -307,8 +312,15 @@ def create_app(data_folder: str | None = None) -> Flask:
 
     @app.post("/api/evidence/check")
     def check_evidence():
-        archive, _ = file_attachment(exchange.MAX_REPORT_PACKAGE, "a report evidence ZIP")
+        archive, _ = file_attachment(review.REVIEW_MAX_BYTES, "a report evidence ZIP")
+        if review.looks_like_review(archive):
+            return jsonify(review.inspect_zip(archive))
         return jsonify(exchange.inspect_evidence(archive))
+
+    @app.post("/api/review/check")
+    def check_review():
+        archive, _ = file_attachment(review.REVIEW_MAX_BYTES, "an external review ZIP")
+        return jsonify(review.inspect_zip(archive))
 
     @app.get("/api/inspections/<inspection_id>/calibration")
     def calibration_reading(inspection_id):

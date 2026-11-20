@@ -49,7 +49,13 @@ def describe(report: dict) -> dict:
         item["marker_count"] = len(manifest["markers"])
     if "inspection_id" in item:
         base = "/api/inspections/" + item["inspection_id"] + "/reports/" + item["id"]
-        item["links"] = {"html": base + "/print", "zip": base + "/bundle.zip", "manifest": base, "plate": base + "/scope.png"}
+        item["links"] = {
+            "html": base + "/print",
+            "zip": base + "/bundle.zip",
+            "manifest": base,
+            "plate": base + "/scope.png",
+            "review": base + "/review.zip",
+        }
     return item
 
 
@@ -115,7 +121,7 @@ def compare_csv(pair: Pair) -> bytes:
     return render_csv(columns, rows)
 
 
-def metadata_rows(inspection: dict) -> str:
+def metadata_rows(inspection: dict, review: dict | None = None) -> str:
     capture = inspection["capture_metadata"]
     details = {
         "Inspection": inspection["title"],
@@ -130,10 +136,14 @@ def metadata_rows(inspection: dict) -> str:
         "Revision": str(inspection["revision"]),
         "Capture type": "Synthetic demonstration image" if capture["synthetic"] else "Operator-supplied",
     }
+    if review:
+        details["Delivered extent"] = "Selected region only"
+        details["Source capture"] = "Withheld outside the selected region"
+        details["Illumination reference"] = "Withheld from this copy"
     return "".join("<dt>" + escape(name) + "</dt><dd>" + escape(value or "—") + "</dd>" for name, value in details.items())
 
 
-def measurement_section(record: dict, image_url: str, csv_url: str) -> str:
+def measurement_section(record: dict, image_url: str, csv_url: str, allowance: dict | None = None) -> str:
     kind = TOOLS[record["kind"]]
     outcome = record["result"]
     metric_values = outcome["metrics"]
@@ -151,7 +161,8 @@ def measurement_section(record: dict, image_url: str, csv_url: str) -> str:
         '<h2>' + escape(kind.title) + '</h2>'
         '<p>' + escape(kind.description) + '</p>'
         '<figure><img src="' + escape(image_url, quote=True) + '" alt="' + escape(kind.title, quote=True) + ' overlay"></figure>'
-        '<table>' + "".join(lines) + '</table>'
+        + allowance_html(allowance)
+        + '<table>' + "".join(lines) + '</table>'
         '<ul>' + notices + '</ul>'
         '<p><a href="' + escape(csv_url, quote=True) + '">Download measurement table</a></p>'
         '<details><summary>Analysis settings</summary><ul>' + "".join(params) + '</ul></details>'
@@ -159,19 +170,43 @@ def measurement_section(record: dict, image_url: str, csv_url: str) -> str:
     )
 
 
-def marker_section(entries: list[dict]) -> str:
+def allowance_html(allowance: dict | None) -> str:
+    if allowance is None:
+        return ""
+    label = "Re-measurable from this package" if allowance["can_remeasure"] else "Compare against issued evidence only"
+    lines = "".join("<li>" + escape(reason) + "</li>" for reason in allowance["reasons"])
+    body = "<ul>" + lines + "</ul>" if lines else ""
+    return (
+        '<p class="allowance ' + ("ok" if allowance["can_remeasure"] else "limited") + '">'
+        + escape(label) + '</p>' + body
+    )
+
+
+def marker_section(entries: list[dict], review: dict | None = None) -> str:
     if not entries:
         return ""
+    allowed = {item["label"]: item for item in (review["markers"] if review else [])}
     rows = []
     for marker in entries:
         x, y = [format_number(value, 1) for value in marker["point"]]
+        if review:
+            entry = allowed.get(marker["label"], {})
+            shown = "Included" if entry.get("in_package") else "Coordinates only — outside the delivered region"
+        else:
+            shown = "Included"
         rows.append(
             "<tr><th>" + escape(marker["label"]) + "</th><td>" + escape(x + ", " + y) + "</td>"
+            "<td>" + escape(shown) + "</td>"
             "<td>" + escape(marker["comment"]) + "</td></tr>"
         )
+    heading = "<th>Picture</th>" if review else ""
+    note = (
+        '<p class="review-note">Markers listed as coordinates only fall outside the delivered region and are not pictured.</p>'
+        if review and any(not item["in_package"] for item in review["markers"]) else ""
+    )
     return (
-        '<section><h2>Inspection markers</h2><table><thead>'
-        '<tr><th>Marker</th><th>Measuring coordinates (px)</th><th>Observation</th></tr>'
+        '<section><h2>Inspection markers</h2>' + note + '<table><thead>'
+        '<tr><th>Marker</th><th>Measuring coordinates (px)</th>' + heading + '<th>Observation</th></tr>'
         "</thead><tbody>" + "".join(rows) + "</tbody></table></section>"
     )
 
@@ -195,6 +230,10 @@ figure { margin: 0; }
 figure img { display: block; max-width: 100%; max-height: 460px; margin: 0 auto 20px; }
 code { overflow-wrap: anywhere; }
 .summary { white-space: pre-wrap; }
+.allowance { font-weight: 650; margin: .7em 0 .3em; }
+.allowance.ok { color: #3f6448; }
+.allowance.limited { color: #8a5a2c; }
+.review-note { border-left: 3px solid #b7bda7; padding-left: 12px; color: #4c5142; }
 a { color: #4b6049; }
 @media print {
   :root { background: white; }
@@ -205,35 +244,71 @@ a { color: #4b6049; }
 """
 
 
-def render_print(report: dict, *, offline: bool = False) -> str:
+def render_print(report: dict, *, offline: bool = False, review: dict | None = None) -> str:
     evidence = report["manifest"]
     inspection = evidence["inspection"]
-    review = evidence["review"]
+    review_details = evidence["review"]
     root = "/api/inspections/" + inspection["id"]
+    allowances = {item["run_id"]: item for item in review["measurements"]} if review else {}
     sections = []
     for seq, run in enumerate(evidence["measurements"], 1):
         name = f"measurements/{seq:02d}-{run['kind']}"
         endpoint = root + "/runs/" + run["id"]
         image_url = name + ".png" if offline else endpoint + "/preview.png"
         csv_url = name + ".csv" if offline else endpoint + "/table.csv"
-        sections.append(measurement_section(run, image_url, csv_url))
+        sections.append(measurement_section(run, image_url, csv_url, allowances.get(run["id"])))
     scope_url = "scope.png" if offline else root + "/reports/" + report["id"] + "/scope.png"
     scope = '<figure><img src="' + escape(scope_url, quote=True) + '" alt="Source and measuring support with calibration and markers"></figure>'
-    disposition = DISPOSITIONS[review["disposition"]]
+    disposition = DISPOSITIONS[review_details["disposition"]]
     notices = (
-        '<p class="summary">' + escape(review["summary"]) + '</p>'
-        if review["summary"] else ""
+        '<p class="summary">' + escape(review_details["summary"]) + '</p>'
+        if review_details["summary"] else ""
     )
     stamp = evidence["created_at"].replace("T", " ")
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        '<title>' + escape(review["title"]) + '</title><style>' + PRINT_STYLES + '</style></head><body>'
-        '<header><div class="brand">Endgrain Lab · Inspection record</div>'
-        '<h1>' + escape(review["title"]) + '</h1>'
-        '<p>' + escape(disposition) + ' &nbsp;·&nbsp; ' + escape(review["reviewer"]) + ' &nbsp;·&nbsp; ' + escape(stamp) + '</p>'
-        '</header><section><h2>Scope</h2><dl>' + metadata_rows(inspection) + '</dl>' + notices + scope + '</section>'
-        + "".join(sections) + marker_section(evidence["markers"])
-        + '<footer><p>Original SHA-256 <code>' + escape(inspection["source_digest"]) + '</code></p>'
+        '<title>' + escape(review_details["title"]) + '</title><style>' + PRINT_STYLES + '</style></head><body>'
+        '<header><div class="brand">Endgrain Lab · ' + ("External review copy" if review else "Inspection record") + '</div>'
+        '<h1>' + escape(review_details["title"]) + '</h1>'
+        '<p>' + escape(disposition) + ' &nbsp;·&nbsp; ' + escape(review_details["reviewer"]) + ' &nbsp;·&nbsp; ' + escape(stamp) + '</p>'
+        '</header><section><h2>Scope</h2><dl>' + metadata_rows(inspection, review) + '</dl>' + notices + scope + '</section>'
+        + review_section(review)
+        + "".join(sections) + marker_section(evidence["markers"], review)
+        + '<footer><p>' + ("Issued source SHA-256" if review else "Original SHA-256")
+        + ' <code>' + escape(inspection["source_digest"]) + '</code></p>'
         + '<p>Manifest SHA-256 <code>' + escape(report["digest"]) + '</code></p></footer></body></html>'
+    )
+
+
+def review_section(review: dict | None) -> str:
+    if not review:
+        return ""
+    support = review["support"]
+    limits = review["limitations"]
+    bounds = support["measured_bounds"]
+    extent = (
+        f"{bounds[0]}–{bounds[2]} × {bounds[1]}–{bounds[3]} measuring px"
+        if bounds else "no supported pixels"
+    )
+    rows = [
+        ("Report ID", review["record"]["report_id"]),
+        ("Delivered extent", extent + " (selected region only)"),
+        ("Withheld", "Everything outside the selected region; illumination reference and gain map"),
+        ("Scale", f"{support['mm_per_measuring_x']:.4g} × {support['mm_per_measuring_y']:.4g} mm per measuring pixel"
+         if support.get("mm_per_measuring_x") is not None else "Uncalibrated measuring pixels"),
+        ("Illumination", limits["illumination"]),
+        ("Calibration anchors", limits["calibration_anchors"]),
+        ("Outside the region", limits["outside_region"]),
+        ("Re-measurable tools", ", ".join(limits["remeasurable"]) or "None"),
+        ("Compare-only tools", ", ".join(limits["compare_only"]) or "None"),
+    ]
+    body = "".join("<dt>" + escape(name) + "</dt><dd>" + escape(value) + "</dd>" for name, value in rows)
+    return (
+        '<section class="review-note"><h2>External review scope</h2>'
+        '<p>' + escape(review["disclosure"][0]) + '</p>'
+        + "".join('<p class="review-note">' + escape(line) + '</p>' for line in review["disclosure"][1:])
+        + '<dl>' + body + '</dl>'
+        "<p>Every picture excludes the source capture and the illumination reference. "
+        "Transparent areas are empty: they hold no original colour values.</p></section>"
     )
