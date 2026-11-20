@@ -132,6 +132,8 @@ def screening_entry(row: dict, context: dict) -> dict:
     defined = isinstance(val, (int, float)) and not isinstance(val, bool) and isfinite(val)
     can_measure = comparable and defined
     checked = "incompatible_scale" if not comparable else (safety_band(row, val, context) if defined else "undefined")
+    basis = reading.get("basis") or {}
+    measured_area = basis.get("survey_area", measure.get("survey_area"))
     return {
         **result,
         "status": checked,
@@ -139,6 +141,12 @@ def screening_entry(row: dict, context: dict) -> dict:
         "recorded_value": val if defined else None,
         "display": render_metric(val if defined else None, mode, unit, measure),
         "unit": unit,
+        "measured_area": measured_area,
+        "measured_area_display": (
+            None if measured_area is None
+            else f"{measured_area:,.2f} mm²" if unit == "mm" else f"{measured_area:,.0f} px²"
+        ),
+        "density_basis": basis.get("density_basis", measure.get("density_basis")),
         "calibration": snapshot["plane"]["calibration"]["mode"],
         "roi": bool(snapshot["state"]["region"]),
         "lighting": bool(snapshot["state"]["lighting"]),
@@ -182,6 +190,23 @@ def audit_groups(records: list[dict]) -> list[str]:
     return notices
 
 
+def measured_area_notice(records: list[dict], params: dict) -> list[str]:
+    """State which measured area each density or area reading was divided by."""
+    if params["kind"] != "pores" or params["mode"] not in {"density", "area"}:
+        return []
+    real = [entry for entry in records if entry["run_id"] and entry["measured_area"] is not None]
+    if not real:
+        return []
+    shown = {(entry["measured_area"], entry["unit"]) for entry in real}
+    if len(shown) == 1:
+        area, unit = shown.pop()
+        text = f"{area:,.2f} mm²" if unit == "mm" else f"{area:,.0f} px²"
+        return [f"Every reading uses the same measurable area: {text} of supported pixels inside each face's drawn region."]
+    return [
+        "Faces use different measurable areas. Compare each density against its own face area rather than summing across the lot.",
+    ]
+
+
 def build_survey(db: Database, raw: Any) -> Survey:
     params = chosen_metric(raw)
     source = first_runs(db, params)
@@ -195,7 +220,7 @@ def build_survey(db: Database, raw: Any) -> Survey:
         "summary": summarize_numeric(entries, params),
         "faces": len(entries),
     }
-    return Survey(entries, context, warnings + audit_groups(entries))
+    return Survey(entries, context, warnings + audit_groups(entries) + measured_area_notice(entries, params))
 
 
 def payload(value: Survey) -> dict:
@@ -207,12 +232,15 @@ def to_csv(value: Survey) -> bytes:
         [
             "lot", "inspection", "wood_species", "surface", "capture", "measurement",
             "snapshot_revision", "current_revision", "value", "unit", "status", "synthetic",
+            "measurable_area", "measurable_area_unit", "density_basis",
         ],
         [
             [
                 value.context["lot"], item["title"], item["material"], item["surface"],
                 item["capture_id"], item["run_id"], item["revision"], item["active_revision"],
                 item.get("recorded_value"), item["unit"], item["status"], item["synthetic"],
+                item.get("measured_area"), item["unit"] if item.get("measured_area") is not None else "",
+                item.get("density_basis"),
             ]
             for item in value.records
         ],

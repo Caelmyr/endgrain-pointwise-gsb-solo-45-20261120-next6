@@ -239,3 +239,7 @@ dialog::backdrop { background:#2630208c; }
  .lot-inputs { grid-template-columns:repeat(2,minmax(0,1fr)); }
  .probe-content { grid-template-columns:1fr; }
 }
+.basis-note { margin:8px 0 9px; padding:8px 10px; border-left:3px solid #c9b26f; background:#f3f0df; border-radius:0 4px 4px 0; font-size:11px; color:#4d5443; }
+.basis-note strong { display:block; margin-bottom:4px; font-size:11px; letter-spacing:.03em; text-transform:uppercase; }
+.basis-note ul { margin:0; padding-left:15px; }
+.basis-note li+li { margin-top:3px; }

@@ -26,7 +26,7 @@ For a Python 3.11 environment, install `requirements.txt` and run `./start.sh`. 
 - **Capture quality** shows channel clipping, low-detail regions, glare-like pixels and supported coverage.
 - **Annual ring transect** samples a narrow band and suggests contrast boundaries. Inspect or replace the candidates before interpreting the distances as growth increments.
 - **Crack traces** estimates skeleton lengths and dark-region widths. It identifies branch and edge-touching regions as review candidates.
-- **Vessel pores** estimates component diameter, area and density from compact dark regions.
+- **Vessel pores** estimates component diameter, area and density from compact dark regions. A pore crossing the drawn region line is counted once from the complete contour visible in the photograph, so two adjacent regions never count the same pore twice. Pores running into the image edge or a transparency gap are not completed: they are excluded, or kept as an explicit partial reading when edge pores are allowed. Pore density and pore area are divided by the same measurable area - the supported pixels inside the drawn region - which the overlay, page and CSV state per reading. Interior pores clear of the line keep their original reading.
 - **Grain orientation** maps axial texture and represents ambiguous local orientation separately from reliable regions.
 - **Saw chatter** measures texture power within an axis and wavelength band in overlapping windows.
 - **Wood footprint** isolates a warm, bright connected end-face silhouette against its backing.

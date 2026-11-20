@@ -146,13 +146,21 @@ def measurement_section(record: dict, image_url: str, csv_url: str) -> str:
         for key, value in record["params"].items()
     ]
     notices = "".join("<li>" + escape(notice) + "</li>" for notice in outcome["notices"])
+    basis = outcome.get("basis", {}).get("contours", [])
+    basis_block = (
+        '<div class="basis"><strong>Measured-area basis</strong><ul>'
+        + "".join("<li>" + escape(line) + "</li>" for line in basis)
+        + "</ul></div>"
+        if basis else ""
+    )
     return (
         '<section class="measurement">'
         '<h2>' + escape(kind.title) + '</h2>'
         '<p>' + escape(kind.description) + '</p>'
         '<figure><img src="' + escape(image_url, quote=True) + '" alt="' + escape(kind.title, quote=True) + ' overlay"></figure>'
         '<table>' + "".join(lines) + '</table>'
-        '<ul>' + notices + '</ul>'
+        + basis_block
+        + '<ul>' + notices + '</ul>'
         '<p><a href="' + escape(csv_url, quote=True) + '">Download measurement table</a></p>'
         '<details><summary>Analysis settings</summary><ul>' + "".join(params) + '</ul></details>'
         '</section>'
@@ -194,6 +202,9 @@ th,td { text-align: left; padding: .45em .6em; border-bottom: 1px solid #cccabb;
 figure { margin: 0; }
 figure img { display: block; max-width: 100%; max-height: 460px; margin: 0 auto 20px; }
 code { overflow-wrap: anywhere; }
+.basis { margin: .6em 0 1em; padding: .6em .88em; border-left: 3px solid #b7a260; background: #f5f1e1; }
+.basis strong { display: block; margin-bottom: .35em; }
+.basis ul { margin: 0; padding-left: 1.2em; }
 .summary { white-space: pre-wrap; }
 a { color: #4b6049; }
 @media print {

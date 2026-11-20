@@ -110,9 +110,13 @@ function surveyOutput(data, onSelect) {
     missing: "No eligible measurement", incompatible_scale: "Other scale", undefined: "No numeric reading",
     measured: "Measured", above: "Above limit", below: "Below limit", historic: "Older revision",
   };
-  const display = table(["Face", "Revision", source.metric_title, "Screening"], data.items.map(record => [
-    record.title, record.revision, record.display, names[record.status] || record.status,
-  ]));
+  const display = table(
+    ["Face", "Revision", source.metric_title, "Measurable area", "Screening"],
+    data.items.map(record => [
+      record.title, record.revision, record.display, record.measured_area_display || "—",
+      names[record.status] || record.status,
+    ]),
+  );
   display.querySelectorAll("tbody tr").forEach((row, index) => {
     const item = data.items[index];
     row.cells[0].replaceChildren(button(item.title, () => onSelect(item.inspection_id), "text-link"));

@@ -151,10 +151,26 @@ export function metricCards(tool, result) {
   )));
 }
 
+const PORE_DECISIONS = {
+  counted_inside: "Whole inside region",
+  counted_closed: "Closed across the line",
+  counted_partial: "Partial, capture edge",
+  outside_region: "Visible, centre outside region",
+  excluded_at_capture: "Not counted, capture edge",
+  excluded_too_small: "Not counted, too small",
+  excluded_too_big: "Not counted, too large",
+  excluded_shape: "Not counted, shape",
+};
+
+export function decisionLabel(value) {
+  return PORE_DECISIONS[value] || value || "—";
+}
+
 export function objectTable(run) {
   const measures = run.result;
   let rows = [];
   let headers = [];
+  let leading = null;
   if (run.kind === "rings") {
     headers = ["Crossing", "Position", "Previous interval", "Origin"];
     rows = (measures.crossings || []).map((entry, ix) => [
@@ -168,19 +184,28 @@ export function objectTable(run) {
       displayValue(entry.median_width, "linear", measures.unit), entry.junctions, entry.touches_support_edge ? "Yes" : "No",
     ]);
   } else if (run.kind === "pores") {
-    headers = ["Pore", "Area", "Diameter", "Roundness"];
+    const basis = measures.basis || {};
+    const notes = (basis.contours || []).map(line => el("li", {text: line}));
+    if (notes.length) {
+      leading = el("div", {className: "basis-note"}, el("strong", {text: "Measured-area basis"}), el("ul", {}, ...notes));
+    }
+    headers = ["Pore", "Counted as", "Full contour area", "Area inside region", "Diameter", "Roundness"];
     rows = (measures.objects || []).map(entry => [
-      entry.id, displayValue(entry.area, "area", measures.unit),
+      entry.id ?? "—",
+      decisionLabel(entry.decision),
+      displayValue(entry.area, "area", measures.unit),
+      displayValue(entry.measured_area, "area", measures.unit),
       displayValue(entry.diameter, "linear", measures.unit), displayValue(entry.roundness),
     ]);
   } else if (run.kind === "colors") {
     headers = ["Swatch", "Qualified pixels", "Coverage"];
     rows = (measures.objects || []).map(entry => [entry.label, entry.pixels, displayValue(entry.coverage, "%")]);
   }
-  if (!rows.length) return null;
-  return el("details", {className: "manual"}, el("summary", {text: "Show readings · " + rows.length}),
+  if (!rows.length) return leading;
+  const detail = el("details", {className: "manual"}, el("summary", {text: "Show readings · " + rows.length}),
     table(headers, rows),
   );
+  return leading ? el("div", {}, leading, detail) : detail;
 }
 
 export function table(headers, rows) {
