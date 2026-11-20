@@ -220,7 +220,22 @@ def references(example: Example) -> np.ndarray:
     soft = 26 * (1 - x / w) - 15 * ((y / h - 0.42) ** 2) + 5 * np.cos(y / 149)
     spot = 25 * np.exp(-((x - w * 0.77) / (w * 0.17)) ** 2 - ((y - h * 0.22) / (h * 0.23)) ** 2)
     gray = np.clip(np.rint(168 + soft + spot), 0, 255).astype(np.uint8)
-    return np.repeat(gray[..., None], 3, axis=2)
+    rgb = np.repeat(gray[..., None], 3, axis=2)
+    alpha = np.full((h, w), 255, dtype=np.uint8)
+    # A localized specular reflection on the board: blown-out, unmeasurable.
+    glare = ((x - w * 0.70) / (w * 0.045)) ** 2 + ((y - h * 0.26) / (h * 0.05)) ** 2 <= 1
+    rgb[glare] = 255
+    # A handful of small transparent dead spots: small enough to interpolate.
+    for cx, cy, radius in ((0.30, 0.34, 7), (0.345, 0.39, 5), (0.47, 0.20, 4)):
+        hole = (x - w * cx) ** 2 + (y - h * cy) ** 2 <= radius ** 2
+        alpha[hole] = 0
+        rgb[hole] = 0
+    # One broad damaged region with too little board around its centre to trust
+    # a fill: the rims blend smoothly while the middle stays on the original.
+    damaged = ((x - w * 0.60) / (w * 0.105)) ** 2 + ((y - h * 0.70) / (h * 0.135)) ** 2 <= 1
+    alpha[damaged] = 0
+    rgb[damaged] = 0
+    return np.dstack((rgb, alpha))
 
 
 def make_region(example: Example, width: int, height: int) -> list[list[float]]:

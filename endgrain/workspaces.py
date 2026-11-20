@@ -136,15 +136,19 @@ def lighting_view(frame: Frame, variant: str) -> np.ndarray:
     elif variant == "corrected":
         rgb = corrected.rgb
     else:
-        missing = frame.source_support & ~corrected.valid
-        gain = corrected.valid & (corrected.gain >= 1.06)
-        dim = corrected.valid & (corrected.gain <= 0.94)
+        gain = corrected.measured & (corrected.gain >= 1.06)
+        dim = corrected.measured & (corrected.gain <= 0.94)
         rgb = symmetric_overlay(
             corrected.rgb,
             [
+                # White-board measurement, gain direction.
                 (gain, (105, 200, 175), 0.55),
                 (dim, (124, 161, 218), 0.50),
-                (missing, (228, 164, 89), 0.76),
+                # Field estimated from nearby measured reference pixels.
+                (corrected.estimated, (196, 150, 222), 0.62),
+                # Locations kept on the original capture for lack of evidence.
+                (corrected.retained, (228, 164, 89), 0.76),
+                # Clipping drawn last so it is never covered by a class tint.
                 (corrected.clipped, (228, 75, 83), 0.82),
             ],
             support=frame.source_support,

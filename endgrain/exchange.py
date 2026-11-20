@@ -202,11 +202,12 @@ def _read_reference(raw, source, zipped: ZipFile, members: dict):
     if ref.dimensions != source.dimensions:
         raise WorkbenchError("Archived sample and reference sizes differ.", "reference_id")
     payload = document(described.get("adjustment"), "lighting settings")
-    fields(payload, {"strength", "max_gain", "blur_px"}, "lighting settings")
+    fields(payload, {"strength", "max_gain", "blur_px", "highlight_knee"}, "lighting settings")
     controls = {
         "strength": number(payload.get("strength"), "correction strength", 0, 1),
         "max_gain": number(payload.get("max_gain"), "maximum gain", 1, 4),
         "blur_px": number(payload.get("blur_px"), "reference smoothing", 2, 100),
+        "highlight_knee": number(payload.get("highlight_knee", 0.9), "highlight protection", 0.6, 1.0),
     }
     apply_flat_field(source.pixels, source.available, ref.pixels, ref.available, controls)
     return reference, controls, name

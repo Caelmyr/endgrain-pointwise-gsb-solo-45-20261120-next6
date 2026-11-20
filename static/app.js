@@ -234,6 +234,15 @@ function renderSetup() {
     el("div", {className: "setup-row"}, el("span", {text: cur.state.lighting ? "Reference applied" : "Original illumination"}),
       ...(stats?.lighting ? [el("strong", {text: displayValue(stats.lighting.reference_coverage, "%")})] : [])),
   );
+  const light = stats?.lighting;
+  if (cur.state.lighting && light) {
+    $("#setup-state").append(el("div", {className: "setup-row setup-lighting"},
+      el("span", {className: "lighting-breakdown", text: [
+        "Board " + displayValue(light.measured_coverage, "%"),
+        "Estimated " + displayValue(light.estimated_coverage, "%"),
+        "Kept original " + displayValue(light.retained_coverage, "%"),
+      ].join("  ·  ")})));
+  }
   if (stats && stats.coverage !== null) {
     $("#setup-state").append(el("div", {className: "setup-row"}, el("span", {text: "Supported area"}),
       el("strong", {text: displayValue(stats.coverage, "%")})));
@@ -338,6 +347,7 @@ function renderImage() {
     title = "Illumination gain map";
   }
   if ((mode === "result" && !showResult) || (mode === "gain" && !showGain)) mode = "working";
+  $("#lighting-legend").hidden = !showGain;
   const plane = showResult ? resultRun.snapshot.plane : record.plane;
   $$("[data-image]").forEach(item => {
     item.classList.toggle("active", item.dataset.image === mode);
@@ -745,7 +755,7 @@ function wire() {
     }
     if (!selected) throw new Error("Choose or import an illumination reference.");
     const values = {reference_id: selected};
-    ["strength", "max_gain", "blur_px"].forEach(key => { values[key] = inputs[key].valueAsNumber; });
+    ["strength", "max_gain", "blur_px", "highlight_knee"].forEach(key => { values[key] = inputs[key].valueAsNumber; });
     await change({lighting: values}, "Illumination correction saved");
     $("#light-dialog").close();
     state.image = "gain";

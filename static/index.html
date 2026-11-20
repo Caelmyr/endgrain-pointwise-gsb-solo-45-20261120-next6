@@ -105,6 +105,12 @@
             </div>
             <span id="cursor-label" class="cursor">—</span>
           </div>
+          <div id="lighting-legend" class="lighting-legend" hidden>
+            <span><i class="swatch swatch-measured"></i>Board measured · gain tint</span>
+            <span><i class="swatch swatch-estimated"></i>Estimated from nearby board</span>
+            <span><i class="swatch swatch-retained"></i>Original kept · no local evidence</span>
+            <span><i class="swatch swatch-clipped"></i>Would clip after correction</span>
+          </div>
         </div>
 
         <div id="status-bar" class="status-bar" role="status" hidden></div>
@@ -347,7 +353,11 @@
         <label>Strength<input name="strength" type="number" min="0" max="1" step="0.05" value="1" required></label>
         <label>Maximum gain<input name="max_gain" type="number" min="1" max="4" step="0.1" value="2" required></label>
         <label>Reference smoothing (px)<input name="blur_px" type="number" min="2" max="100" step="1" value="18" required></label>
+        <label class="full">Highlight protection (linear knee)
+          <input name="highlight_knee" type="number" min="0.6" max="1" step="0.05" value="0.9" required>
+        </label>
       </div>
+      <p class="subtle">Gain is rolled off above this tone so bright detail and fine dark lines are not pushed white. Set to 1 to brighten without protection.</p>
       <div class="dialog-error" hidden></div>
       <button class="button strong" type="submit">Apply correction</button>
       <button class="button ghost" id="light-reset" type="button">Use original lighting</button>
