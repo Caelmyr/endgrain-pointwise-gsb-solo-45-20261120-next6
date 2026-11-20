@@ -415,6 +415,29 @@ class Database:
             return json.loads(row[0])
         return row[0]
 
+    def replace_run_on(
+        self, conn: sqlite3.Connection, inspection_id: str, run_id: str, outcome: dict,
+    ) -> dict:
+        current = self.run_on(conn, inspection_id, run_id)
+        conn.execute(
+            """UPDATE runs SET params = ?, snapshot = ?, result = ?, preview = ?, table_data = ?
+               WHERE inspection_id = ? AND id = ?""",
+            (
+                encode(outcome["params"]),
+                encode(outcome["snapshot"]),
+                encode(outcome["result"]),
+                outcome["preview"],
+                encode(outcome["table_data"]),
+                inspection_id,
+                run_id,
+            ),
+        )
+        self.event(
+            conn, inspection_id, current["revision"], "analysis_confirmed",
+            {"kind": current["kind"], "run_id": run_id},
+        )
+        return self.run_on(conn, inspection_id, run_id)
+
     def add_note(self, inspection_id: str, revision: int, payload: dict) -> dict:
         note_id = identifier()
         now = timestamp()

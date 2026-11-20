@@ -11,7 +11,8 @@ const state = {
   library: [], tools: new Map(), current: null, stats: null,
   runs: [], notes: [], selectedRun: null, tool: "rings", settings: {},
   view: "inspect", image: "working", drawing: null, marker: null,
-  transect: null, swatches: null, footprintSeed: null, edgeCorners: null,
+  transect: null, transects: {a: null, b: null},
+  swatches: null, footprintSeed: null, edgeCorners: null,
   selectionEpoch: 0, queryEpoch: 0,
 };
 
@@ -121,6 +122,7 @@ async function reloadLibrary() {
 function clearGeometry() {
   state.drawing = null;
   state.transect = null;
+  state.transects = {a: null, b: null};
   state.swatches = null;
   state.footprintSeed = null;
   state.edgeCorners = null;
@@ -289,7 +291,12 @@ function renderToolGeometry() {
   const group = $("#geometry-controls");
   group.replaceChildren();
   $("#ring-manual").hidden = state.tool !== "rings";
+  $("#crossdating-manual").hidden = state.tool !== "crossdating";
   $("#tool-hint").textContent = "Each run saves its overlay, settings and measurement table.";
+  if (state.tool === "crossdating") {
+    renderCrossdatingGeometry(group);
+    return;
+  }
   if (state.tool in geometries) {
     const [name, hint, minimum, maximum, placed] = geometries[state.tool];
     const options = [button(name, () => startDrawing(state.tool, hint, minimum, maximum, "working"))];
@@ -310,6 +317,40 @@ function renderToolGeometry() {
     };
     $("#tool-hint").textContent = placed ? placed.length + " marked position(s)." : defaults[state.tool];
   }
+}
+
+function renderCrossdatingGeometry(group) {
+  const lines = [
+    {code: "a", label: "Transect A (inner → outer)"},
+    {code: "b", label: "Transect B (inner → outer)"},
+  ];
+  lines.forEach(({code, label}) => {
+    const placed = state.transects[code];
+    const options = [
+      button("Place " + code.toUpperCase(), () => startDrawing(
+        "crossdating_" + code, "Mark the inner end then the outer end of transect " + code.toUpperCase() + ".",
+        2, 2, "working", {transectCode: code},
+      )),
+    ];
+    if (placed) options.push(button("Clear", () => {
+      state.transects[code] = null;
+      renderToolGeometry();
+      renderImage();
+    }, "text-link"));
+    group.append(
+      el("div", {className: "geometry-inline crossdating-line"},
+        el("span", {className: "line-tag line-" + code, text: label}), ...options),
+    );
+  });
+  const count = lines.filter(({code}) => state.transects[code]).length;
+  group.append(button("Clear both lines", () => {
+    state.transects = {a: null, b: null};
+    renderToolGeometry();
+    renderImage();
+  }, "text-link"));
+  $("#tool-hint").textContent = count
+    ? count + " of 2 transects placed. Defaults are used for any unplaced line."
+    : "Place two inner-to-outer transects, or run with the default pair.";
 }
 
 function renderImage() {
@@ -351,6 +392,7 @@ function renderImage() {
     url, title, mode, plane, drawing: state.drawing, region: record.state.region,
     notes: showResult && resultRun.revision !== record.revision ? [] : state.notes,
     guide: state.tool === "rings" ? state.transect : null,
+    crossGuides: state.tool === "crossdating" ? state.transects : null,
   });
 }
 
@@ -392,6 +434,10 @@ function renderResults() {
   }
   $("#result-title").textContent = stored.title;
   downloads.append(link("Overlay ↓", stored.links.preview + "?download=1"), link("CSV ↓", stored.links.csv));
+  if (stored.kind === "crossdating") {
+    renderCrossdatingResult(stored, output);
+    return;
+  }
   const items = [metricCards(state.tools.get(stored.kind), stored.result)];
   if (stored.result.chart) items.push(plot(stored.result.chart));
   const messages = [...stored.result.notices];
@@ -400,6 +446,131 @@ function renderResults() {
   const rows = objectTable(stored);
   if (rows) items.push(rows);
   output.replaceChildren(...items);
+}
+
+function renderCrossdatingResult(stored, output) {
+  const result = stored.result;
+  const items = [metricCards(state.tools.get(stored.kind), result)];
+  const messages = [...result.notices];
+  if (stored.revision !== state.current.revision) messages.unshift("This measurement belongs to revision " + stored.revision + ".");
+  if (messages.length) items.push(notices(messages));
+  const pendingZones = (result.ambiguities || []).filter(zone =>
+    (result.pending_ambiguities || []).includes(zone.ambiguity_id));
+  if (pendingZones.length) items.push(ambiguityPanel(stored, pendingZones));
+  items.push(sharedSequenceTable(result));
+  if (result.charts) items.push(plot(result.charts.a), plot(result.charts.b));
+  output.replaceChildren(...items);
+}
+
+function ambiguityPanel(stored, zones) {
+  const result = stored.result;
+  const cards = zones.map(zone => {
+    const row = result.rows.find(item => item.ambiguity_id === zone.ambiguity_id);
+    const optionButtons = [];
+    const choices = [
+      {choice: "match", text: "Same year on both lines"},
+      {choice: "only_a", text: "Only transect A has this ring"},
+      {choice: "only_b", text: "Only transect B has this ring"},
+    ];
+    choices.forEach(({choice, text}) => {
+      const available = choice === "match" || zone.alternatives.some(alt => alt.choice === choice);
+      const btn = button(text, () => confirmAmbiguity(stored, zone.ambiguity_id, choice), "button outline");
+      btn.disabled = !available;
+      optionButtons.push(btn);
+    });
+    const altText = zone.alternatives
+      .map(alt => (alt.choice === "only_a" ? "A-only" : "B-only") + " score " + alt.score)
+      .join(" · ");
+    const detail = [
+      "A crossing #" + (row?.a_crossing ?? "—"),
+      "B crossing #" + (row?.b_crossing ?? "—"),
+      "pair score " + zone.match_score,
+      altText,
+      zone.near_evidence_gap ? "next to an evidence gap" : "",
+    ].filter(Boolean).join(" · ");
+    return el("div", {className: "ambiguity-card" + (zone.near_evidence_gap ? " gap-near" : "")},
+      el("strong", {text: "Ambiguous zone " + (zone.ambiguity_id + 1)}),
+      el("p", {className: "subtle", text: detail}),
+      el("div", {className: "ambiguity-choices"}, ...optionButtons));
+  });
+  const confirmAll = button("Confirm all as same-year rings",
+    () => confirmAllAmbiguities(stored, zones), "button strong");
+  return el("div", {className: "ambiguity-panel"},
+    el("div", {className: "ambiguity-head"},
+      el("h4", {text: zones.length + " correspondence" + (zones.length > 1 ? "s" : "") + " need your confirmation"}),
+      confirmAll),
+    ...cards);
+}
+
+async function confirmAllAmbiguities(stored, zones) {
+  const decisions = zones.map(zone => ({ambiguity_id: zone.ambiguity_id, choice: "match"}));
+  status("Updating the shared sequence…");
+  try {
+    const updated = await api(
+      currentApi("/runs/" + stored.id + "/confirm"),
+      json("POST", {revision: state.current.revision, decisions}),
+    );
+    state.runs = state.runs.map(run => run.id === updated.id ? updated : run);
+    selectRun(updated);
+    notify("All correspondences confirmed as same-year rings");
+  } catch (error) {
+    status(error.message, true);
+    notify(error.message, true);
+  }
+}
+
+async function confirmAmbiguity(stored, ambiguityId, choice) {
+  const prior = carryDecisions(stored.result).filter(item => item.ambiguity_id !== ambiguityId);
+  const decisions = [...prior, {ambiguity_id: ambiguityId, choice}];
+  status("Updating the shared sequence…");
+  try {
+    const updated = await api(
+      currentApi("/runs/" + stored.id + "/confirm"),
+      json("POST", {revision: state.current.revision, decisions}),
+    );
+    state.runs = state.runs.map(run => run.id === updated.id ? updated : run);
+    selectRun(updated);
+    status("Ambiguity resolved.");
+    notify("Correspondence confirmed");
+  } catch (error) {
+    status(error.message, true);
+    notify(error.message, true);
+  }
+}
+
+function sharedSequenceTable(result) {
+  const unit = result.unit;
+  const headers = ["Year", "Status", "A #", "A width", "B #", "B width", "Shared width", "Evidence"];
+  const statusLabel = {
+    matched: "Both lines", only_a: "Line A only", only_b: "Line B only",
+    ambiguous: "Needs choice", evidence_gap: "Evidence gap", confirmed: "Confirmed",
+    inner_anchor: "Inner anchor",
+  };
+  const rows = (result.rows || []).map(row => {
+    const evidence = [
+      row.evidence_gap_a ? "A gap" : "",
+      row.evidence_gap_b ? "B gap" : "",
+      row.width_status === "inner_anchor" ? "inner anchor" : "",
+      row.width_status === "partial_evidence" ? "partial" : "",
+    ].filter(Boolean).join(", ");
+    return [
+      row.year_index,
+      statusLabel[row.status] || row.status,
+      row.a_crossing ?? "—",
+      displayValue(row.width_a, "linear", unit),
+      row.b_crossing ?? "—",
+      displayValue(row.width_b, "linear", unit),
+      displayValue(row.shared_width, "linear", unit),
+      evidence || "—",
+    ];
+  });
+  const wrapped = table(headers, rows);
+  wrapped.querySelectorAll("tbody tr").forEach((tr, index) => {
+    const row = result.rows[index];
+    tr.classList.add("seq-" + row.status);
+  });
+  return el("details", {className: "manual", open: true},
+    el("summary", {text: "Shared annual sequence · " + rows.length + " rings"}), wrapped);
 }
 
 function renderNotes() {
@@ -465,6 +636,9 @@ async function finishDrawing() {
     return;
   }
   if (draw.kind === "rings") state.transect = items;
+  if (draw.kind === "crossdating_a" || draw.kind === "crossdating_b") {
+    state.transects[draw.transectCode] = items;
+  }
   if (draw.kind === "colors") state.swatches = items;
   if (draw.kind === "footprint") state.footprintSeed = items[0];
   if (draw.kind === "edge_loss") state.edgeCorners = items;
@@ -490,6 +664,20 @@ async function change(patch, message) {
   notify(message);
 }
 
+function carryDecisions(result) {
+  const valid = new Set((result.ambiguities || []).map(zone => zone.ambiguity_id));
+  const chosen = new Map();
+  (result.rows || []).forEach(row => {
+    if (row.status === "confirmed" && row.ambiguity_id !== null && valid.has(row.ambiguity_id)) {
+      // Re-derive the chosen option from the crossings that remain on the row.
+      const choice = row.a_crossing && !row.b_crossing ? "only_b"
+        : row.b_crossing && !row.a_crossing ? "only_a" : "match";
+      chosen.set(row.ambiguity_id, choice);
+    }
+  });
+  return [...chosen.entries()].map(([ambiguity_id, choice]) => ({ambiguity_id, choice}));
+}
+
 function settingsFromForm(form) {
   const params = {};
   form.querySelectorAll("[data-setting]").forEach(input => {
@@ -502,6 +690,28 @@ function settingsFromForm(form) {
     if (manual) {
       params.manual_crossings = manual.split(",").map(value => Number(value.trim()));
       if (params.manual_crossings.some(value => !Number.isFinite(value))) throw new Error("Separate numeric fractions with commas.");
+    }
+  }
+  if (state.tool === "crossdating") {
+    const lineParams = code => {
+      const line = {};
+      if (state.transects[code]) line.endpoints = state.transects[code];
+      const manual = $("#manual-crossings-" + code).value.trim();
+      if (manual) {
+        line.manual_crossings = manual.split(",").map(value => Number(value.trim()));
+        if (line.manual_crossings.some(value => !Number.isFinite(value))) {
+          throw new Error("Separate numeric fractions with commas for transect " + code.toUpperCase() + ".");
+        }
+      }
+      return line;
+    };
+    params.transects = {a: lineParams("a"), b: lineParams("b")};
+    const selected = state.selectedRun;
+    if (selected?.kind === "crossdating" && Array.isArray(selected.params?.decisions)) {
+      // Re-running keeps decisions already confirmed on the saved reading.
+      params.decisions = selected.params.decisions;
+    } else {
+      params.decisions = selected?.kind === "crossdating" ? carryDecisions(selected.result) : [];
     }
   }
   if (state.tool === "colors" && state.swatches) {
@@ -687,6 +897,10 @@ function wire() {
   $("#tool-select").addEventListener("change", event => {
     state.tool = event.target.value;
     if (state.drawing) cancelDrawing();
+    ["#manual-crossings", "#manual-crossings-a", "#manual-crossings-b"].forEach(selector => {
+      const input = $(selector);
+      if (input) input.value = "";
+    });
     renderTools();
     renderImage();
   });

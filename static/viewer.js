@@ -118,7 +118,7 @@ export class WorkbenchViewer {
   }
 
   paint(size) {
-    const {drawing, mode, plane, region, notes, guide} = this.info;
+    const {drawing, mode, plane, region, notes, guide, crossGuides} = this.info;
     context.clearRect(0, 0, picture.naturalWidth, picture.naturalHeight);
     if (mode === "source" && !drawing) {
       const cal = plane?.calibration;
@@ -128,6 +128,7 @@ export class WorkbenchViewer {
     if (mode === "working") {
       if (!drawing || drawing.kind !== "region") this.path(region, "#dfd3a7", size * 1.15, {dashed: true, closed: true});
       if (!drawing) this.path(guide, "#e2ad6e", size * 1.6, {dotted: true});
+      if (!drawing && crossGuides) this.paintCrossGuides(crossGuides, size);
     }
     if (["working", "result"].includes(mode) && !drawing) {
       (notes || []).forEach(note => {
@@ -139,5 +140,16 @@ export class WorkbenchViewer {
       this.path(drawing.points, "#ffd091", size * 2, {dotted: true});
       drawing.points.forEach((point, ix) => this.label(point, String(ix + 1), size));
     }
+  }
+
+  paintCrossGuides(guides, size) {
+    const tones = {a: "#f0e6c8", b: "#cfe2f2"};
+    ["a", "b"].forEach(code => {
+      const line = guides[code];
+      if (!line) return;
+      this.path(line, tones[code], size * 1.6, {dotted: true});
+      const [x, y] = line[0];
+      this.label([x, y], code.toUpperCase(), size, tones[code]);
+    });
   }
 }

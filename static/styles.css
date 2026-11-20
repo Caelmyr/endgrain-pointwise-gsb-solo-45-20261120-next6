@@ -219,6 +219,25 @@ dialog::backdrop { background:#2630208c; }
 .image-stage.overzoom { justify-items:start; align-items:start; }
 .image-stage.overzoom .image-shell { margin:7px; }
 
+.crossdating-line { width:100%; justify-content:space-between; }
+.line-tag { font-size:11px; font-weight:650; color:var(--green-dark); }
+.line-tag.line-a::before { content:""; display:inline-block; width:9px; height:9px; border-radius:50%; background:#d8c99a; margin-right:5px; }
+.line-tag.line-b::before { content:""; display:inline-block; width:9px; height:9px; border-radius:50%; background:#8fb6d4; margin-right:5px; }
+.ambiguity-panel { margin:10px 0; border:1px solid #ddb78a; background:#fbf3e6; border-radius:7px; padding:12px; }
+.ambiguity-head { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.ambiguity-panel h4 { font-size:14px; margin-bottom:9px; color:#8a5a2b; }
+.ambiguity-head .button { margin-bottom:9px; }
+.ambiguity-card { background:var(--white); border:1px solid #e3d3ba; border-radius:6px; padding:10px; margin-bottom:8px; }
+.ambiguity-card.gap-near { border-color:#cf9a86; }
+.ambiguity-card p { margin:4px 0 8px; font-size:11px; }
+.ambiguity-choices { display:flex; flex-wrap:wrap; gap:6px; }
+.ambiguity-choices .button { font-size:11px; min-height:28px; padding:4px 8px; }
+table tr.seq-ambiguous { background:#f7e7cf; }
+table tr.seq-evidence_gap { background:#f3dcd4; }
+table tr.seq-inner_anchor { background:#eceae0; color:var(--muted); }
+table tr.seq-only_a td:nth-child(3), table tr.seq-only_b td:nth-child(5) { font-weight:700; }
+table tr.seq-confirmed { background:#e7eed9; }
+
 .panel-actions { display:flex; align-items:center; flex-wrap:wrap; gap:7px; }
 .recipe-panel { max-width:1050px; padding:19px; margin-bottom:14px; }
 .recipe-panel h3 { margin-bottom:11px; }

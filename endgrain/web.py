@@ -200,6 +200,10 @@ def create_app(data_folder: str | None = None) -> Flask:
     def measure(inspection_id):
         return jsonify(measurements.execute(db, inspection_id, read_document())), 201
 
+    @app.post("/api/inspections/<inspection_id>/runs/<run_id>/confirm")
+    def confirm_run(inspection_id, run_id):
+        return jsonify(measurements.confirm(db, inspection_id, run_id, read_document()))
+
     @app.get("/api/inspections/<inspection_id>/runs/<run_id>")
     def run(inspection_id, run_id):
         return jsonify(measurements.describe_run(db.run(inspection_id, run_id)))

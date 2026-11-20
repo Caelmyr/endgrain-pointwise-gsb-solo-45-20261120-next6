@@ -25,6 +25,7 @@ For a Python 3.11 environment, install `requirements.txt` and run `./start.sh`. 
 
 - **Capture quality** shows channel clipping, low-detail regions, glare-like pixels and supported coverage.
 - **Annual ring transect** samples a narrow band and suggests contrast boundaries. Inspect or replace the candidates before interpreting the distances as growth increments.
+- **Dual-transect ring sequence** draws two inner-to-outer transects in one inspection and aligns their crossings into one shared annual sequence. Rings that only one line resolves are retained (marked `only_a` / `only_b`), and whenever two correspondences are both plausible the tool raises an ambiguous zone with the available choices for explicit confirmation. A width spanning a check or an unsupported band is withheld as an evidence gap—the distance across the missing evidence is never reported as a single ring width. Confirmations re-run the whole alignment as constrained matches, so no crossing is consumed twice. The confirmed correspondences and the still-pending zones are stored on the run and reproduced in its history view, overlay and CSV; existing single-transect readings remain available unchanged.
 - **Crack traces** estimates skeleton lengths and dark-region widths. It identifies branch and edge-touching regions as review candidates.
 - **Vessel pores** estimates component diameter, area and density from compact dark regions.
 - **Grain orientation** maps axial texture and represents ambiguous local orientation separately from reliable regions.

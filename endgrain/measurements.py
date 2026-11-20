@@ -6,7 +6,7 @@ from typing import Any
 
 import numpy as np
 
-from . import colorzones, cracks, edge_lost, finish, footprint, grain, pores, quality, rings
+from . import colorzones, cracks, crossdating, edge_lost, finish, footprint, grain, pores, quality, rings
 from .database import Database
 from .errors import Conflict, WorkbenchError
 from .imaging import encode_png
@@ -90,6 +90,31 @@ TOOLS = {
             "widths": ("Usable intervals", "count"),
         },
         rings.RING_COLUMNS, rings.normalize_params, rings.measure,
+    ),
+    "crossdating": Tool(
+        "crossdating", "Dual-transect ring sequence",
+        "Align the rings read along two inner-to-outer transects into one shared, reviewable annual sequence.",
+        [
+            control("width_tolerance", "Ring width tolerance", 0.35, step=0.05),
+            control("band", "Band width (px)", 7, step=1),
+            control("prominence", "Minimum prominence", 0.024, step=0.002),
+            control("minimum_gap", "Minimum spacing (px)", 6, step=1),
+            control("polarity", "Boundary tone", "dark", values=("dark", "light")),
+        ],
+        {
+            "shared_rings": ("Shared annual rings", "count"),
+            "paired_rings": ("Rings on both transects", "count"),
+            "single_line_rings": ("Single-transect rings", "count"),
+            "ambiguities": ("Ambiguities pending", "count"),
+            "resolved_ambiguities": ("Ambiguities resolved", "count"),
+            "evidence_gap_rings": ("Evidence-gap rings", "count"),
+            "mean_width": ("Mean width", "linear"),
+            "median_width": ("Median width", "linear"),
+            "measured_widths": ("Measured widths", "count"),
+            "supported_transect_a": ("Transect A support", "%"),
+            "supported_transect_b": ("Transect B support", "%"),
+        },
+        crossdating.CROSSDATING_COLUMNS, crossdating.normalize_params, crossdating.measure,
     ),
     "cracks": Tool(
         "cracks", "Crack traces", "Trace connected dark checks and assess their width, branching and length.",
@@ -288,5 +313,42 @@ def execute(db: Database, inspection_id: str, raw: Any) -> dict:
         tool = TOOLS[kind]
         params = tool.validator(body.get("params", {}), frame.raster.plane)
         return describe_run(db.put_run(inspection_id, revision, calculate(frame, tool, params)))
+    finally:
+        MEASUREMENT_SLOTS.release()
+
+
+def confirm(db: Database, inspection_id: str, run_id: str, raw: Any) -> dict:
+    """Recompute a cross-dating run with the operator's ambiguity decisions.
+
+    The run keeps its identity and its inspection revision; only its params,
+    result, overlay and table are replaced so the history view and downloads
+    reproduce the same correspondences and the same pending zones.
+    """
+    body = document(raw, "cross-dating confirmation")
+    fields(body, {"revision", "decisions"}, "cross-dating confirmation")
+    revision = expect_revision(body)
+    current = db.inspection(inspection_id)
+    db.validate_revision(current, revision)
+    if not MEASUREMENT_SLOTS.acquire(blocking=False):
+        raise Conflict("Two measurements are already processing. Retry when one finishes.")
+    try:
+        with db.transaction(write=False) as conn:
+            saved = db.run_on(conn, inspection_id, run_id)
+        if saved["kind"] != "crossdating":
+            raise WorkbenchError("Ambiguity confirmation only applies to a dual-transect ring sequence.", "run_id")
+        if saved["revision"] != current["revision"]:
+            raise Conflict(
+                "This reading belongs to an older revision. Re-run the dual transect on the current revision to edit its correspondences.",
+                revision=current["revision"],
+            )
+        tool = TOOLS["crossdating"]
+        frame = frame_for(db, current)
+        params = tool.validator(
+            {**saved["params"], "decisions": body.get("decisions", [])}, frame.raster.plane,
+        )
+        outcome = calculate(frame, tool, params)
+        with db.transaction() as conn:
+            updated = db.replace_run_on(conn, inspection_id, run_id, outcome)
+        return describe_run(updated)
     finally:
         MEASUREMENT_SLOTS.release()

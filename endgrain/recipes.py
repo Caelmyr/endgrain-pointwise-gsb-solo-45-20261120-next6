@@ -14,6 +14,7 @@ RECIPE_FIELDS = "id,title,description,inspection_id,recipe,created_at"
 PIXEL_SCALED = {
     "quality": {},
     "rings": {"band": (1, 41), "minimum_gap": (2, 200)},
+    "crossdating": {"band": (1, 41), "minimum_gap": (2, 200)},
     "cracks": {"scale": (2, 44), "minimum_length": (3, 600), "bridge": (0, 4)},
     "pores": {"min_area": (2, 6000), "max_area": (5, 6000)},
     "grain": {"window": (1, 32), "grid": (8, 200)},
@@ -180,8 +181,25 @@ def geometry_parameters(kind: str, params: dict, source: dict, destination: Plan
     previous = params.pop("manual_crossings", [])
     if previous:
         warnings.append("Manual ring crossings are sample-specific. The target suggests new crossings from its pixels.")
+    if kind == "crossdating":
+        transects = params.get("transects")
+        if isinstance(transects, dict):
+            if mode == "defaults":
+                for config in transects.values():
+                    config.pop("endpoints", None)
+                    config.pop("manual_crossings", None)
+                warnings.append("The destination uses default transect positions. Check both lines on the target image.")
+            else:
+                for config in transects.values():
+                    if "endpoints" in config:
+                        config["endpoints"] = [
+                            mapped_point(point, source, destination) for point in config["endpoints"]
+                        ]
+                    config.pop("manual_crossings", None)
+                warnings.append("Both transect positions use the same fractions of the target measuring image.")
+        params["decisions"] = []
+        warnings.append("Ambiguity decisions are image-specific and are not replayed.")
     return warnings
-
 
 def scale_controls(kind: str, params: dict, ratio: float, plane: Plane) -> list[str]:
     limited = []
